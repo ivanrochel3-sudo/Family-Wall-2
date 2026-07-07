@@ -28,7 +28,9 @@ import math
 import html
 import shutil
 import random
+import time
 import traceback
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from datetime import datetime
 import tkinter as tk
@@ -40,6 +42,7 @@ CONFIG_NAME = "family_wall_app_config.json"
 
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff", ".webp"}
 BORDER_EXTS = IMAGE_EXTS | {".mp4", ".mov", ".m4v"}
+SUPPORTED_EXTS = IMAGE_EXTS | {".heic", ".heif"}
 
 DEFAULT_CANVAS_W = 1920
 DEFAULT_CANVAS_H = 1080
@@ -53,9 +56,15 @@ DEFAULT_TEXTURE_MINUTES = 25.0
 DEFAULT_SCALE_OPENING_WITH_BORDER = True
 
 try:
-    from PIL import Image
+    from PIL import Image, ImageOps
 except Exception:
     Image = None
+    ImageOps = None
+
+try:
+    import pillow_heif
+except Exception:
+    pillow_heif = None
 
 
 def app_dir() -> Path:
@@ -112,6 +121,111 @@ def list_images(folder: Path):
 
 def list_borders(folder: Path):
     return list_files(folder, BORDER_EXTS)
+
+
+def list_convertible_images(folder: Path):
+    return sorted([p for p in folder.iterdir() if p.is_file() and p.suffix.lower() in SUPPORTED_EXTS], key=natural_sort_key)
+
+
+def _format_eta(seconds: float) -> str:
+    seconds = max(0, int(round(seconds)))
+    h, rem = divmod(seconds, 3600)
+    m, s = divmod(rem, 60)
+    if h > 0:
+        return f"{h}h {m}m {s}s"
+    return f"{m}m {s}s"
+
+
+def convert_photos_to_jpg(source_folder: Path, output_folder: Path, log=None, progress=None):
+    if Image is None or ImageOps is None:
+        raise RuntimeError("Pillow is required for photo conversion.")
+    source_folder = Path(source_folder)
+    output_folder = Path(output_folder)
+    if not source_folder.exists():
+        raise ValueError("Please choose a valid photo folder.")
+
+    images = list_convertible_images(source_folder)
+    if not images:
+        raise ValueError("No supported image files found in the photo folder.")
+
+    has_heif_files = any(p.suffix.lower() in {".heic", ".heif"} for p in images)
+    if has_heif_files:
+        if pillow_heif is None:
+            raise RuntimeError("HEIC/HEIF files were found, but pillow-heif is not installed. Install it with: pip install pillow-heif")
+        pillow_heif.register_heif_opener()
+
+    output_folder.mkdir(parents=True, exist_ok=True)
+    shuffled = list(images)
+    random.shuffle(shuffled)
+    total = len(shuffled)
+
+    def process_one(path: Path, index: int) -> Path:
+        out_path = output_folder / f"{index:06d}.jpg"
+        with Image.open(path) as im:
+            im = ImageOps.exif_transpose(im)
+            if im.mode in {"RGBA", "LA", "P"}:
+                bg = Image.new("RGB", im.size, "white")
+                if im.mode == "P" and "transparency" in im.info:
+                    im = im.convert("RGBA")
+                else:
+                    im = im.convert("RGBA")
+                bg.paste(im, mask=im.split()[-1])
+                im = bg
+            else:
+                if im.mode != "RGB":
+                    im = im.convert("RGB")
+
+            max_dim = max(im.size)
+            if max_dim > 2556:
+                scale = 2556 / max_dim
+                new_size = (max(1, int(im.width * scale)), max(1, int(im.height * scale)))
+                im = im.resize(new_size, Image.LANCZOS)
+
+            im.save(out_path, format="JPEG", quality=85, optimize=True, progressive=True)
+        return out_path
+
+    if log:
+        log(f"Phase 0: converting {total} source images to optimized JPGs")
+
+    start_time = time.monotonic()
+    last_update_time = start_time
+
+    def emit_progress(done: int, force=False):
+        nonlocal last_update_time
+        now = time.monotonic()
+        should_emit = force or done == 1 or done % 100 == 0 or (now - last_update_time) >= 5.0 or done == total
+        if not should_emit:
+            return
+
+        elapsed = max(0.001, now - start_time)
+        speed = done / elapsed
+        remaining = max(0, total - done)
+        eta_seconds = remaining / speed if speed > 0 else 0
+        percent = (done / total) * 100.0 if total else 100.0
+        msg = (
+            f"Phase 0: {done:,} / {total:,} converted ({percent:.1f}%) | "
+            f"Speed: {speed:.1f} img/sec | Remaining: {_format_eta(eta_seconds)}"
+        )
+        if progress:
+            progress(msg)
+        elif log:
+            log(msg)
+        last_update_time = now
+
+    emit_progress(0, force=True)
+
+    with ThreadPoolExecutor(max_workers=12) as executor:
+        futures = {executor.submit(process_one, path, idx): path for idx, path in enumerate(shuffled, 1)}
+        completed = 0
+        for future in as_completed(futures):
+            future.result()
+            completed += 1
+            emit_progress(completed)
+
+    emit_progress(total, force=True)
+    if log:
+        log(f"Phase 0 complete: created {output_folder}")
+    return output_folder
 
 
 def frames(seconds: float, fps: int) -> int:
@@ -608,6 +722,7 @@ class App(tk.Tk):
         self.copy_template = tk.BooleanVar(value=True)
         self.open_project_after = tk.BooleanVar(value=True)
         self.open_folder_after = tk.BooleanVar(value=True)
+        self.convert_photos = tk.BooleanVar(value=False)
         self.include_borders = tk.BooleanVar(value=bool(cfg.get("border_folder", "")))
         self.scale_opening_with_border = tk.BooleanVar(value=bool(cfg.get("scale_opening_with_border", DEFAULT_SCALE_OPENING_WITH_BORDER)))
 
@@ -675,8 +790,9 @@ class App(tk.Tk):
         ttk.Checkbutton(opts, text="Copy Premiere template into project folder", variable=self.copy_template).grid(row=0, column=0, sticky="w", padx=8, pady=6)
         ttk.Checkbutton(opts, text="Open copied Premiere project when finished", variable=self.open_project_after).grid(row=0, column=1, sticky="w", padx=8, pady=6)
         ttk.Checkbutton(opts, text="Open output folder when finished", variable=self.open_folder_after).grid(row=0, column=2, sticky="w", padx=8, pady=6)
-        ttk.Checkbutton(opts, text="Include randomized border track on V4", variable=self.include_borders).grid(row=1, column=0, sticky="w", padx=8, pady=6)
-        ttk.Checkbutton(opts, text="Scale sharp opening with border", variable=self.scale_opening_with_border).grid(row=1, column=1, sticky="w", padx=8, pady=6)
+        ttk.Checkbutton(opts, text="Convert photos to optimized JPG first", variable=self.convert_photos).grid(row=1, column=0, sticky="w", padx=8, pady=6)
+        ttk.Checkbutton(opts, text="Include randomized border track on V4", variable=self.include_borders).grid(row=1, column=1, sticky="w", padx=8, pady=6)
+        ttk.Checkbutton(opts, text="Scale sharp opening with border", variable=self.scale_opening_with_border).grid(row=1, column=2, sticky="w", padx=8, pady=6)
 
         self.preview = ttk.Label(root, text="", font=("Segoe UI", 10, "bold"))
         self.preview.grid(row=10, column=0, columnspan=3, sticky="w", padx=12, pady=(4, 6))
@@ -719,6 +835,7 @@ class App(tk.Tk):
             "opening_w": self.opening_w.get(),
             "opening_h": self.opening_h.get(),
             "border_minutes": self.border_minutes.get(),
+            "convert_photos": self.convert_photos.get(),
             "scale_opening_with_border": self.scale_opening_with_border.get(),
         }
         save_config(data)
@@ -786,8 +903,8 @@ class App(tk.Tk):
         except Exception:
             self.preview.config(text="Math preview unavailable. Check settings.")
 
-    def validate(self):
-        photos_dir = Path(self.photo_folder.get())
+    def validate(self, photos_dir=None):
+        photos_dir = Path(photos_dir or self.photo_folder.get())
         output_root = Path(self.output_root.get())
         template = Path(self.template_path.get()) if self.template_path.get().strip() else None
         border_dir = Path(self.border_folder.get()) if self.border_folder.get().strip() else None
@@ -838,7 +955,29 @@ class App(tk.Tk):
         try:
             self.save_current_settings()
             self.log("Creating Family Wall project...")
-            photos, photos_dir, output_root, template, borders, textures = self.validate()
+
+            original_photos_dir = Path(self.photo_folder.get())
+            output_root = Path(self.output_root.get())
+            output_root.mkdir(parents=True, exist_ok=True)
+            photos_dir = original_photos_dir
+            if self.convert_photos.get():
+                def phase0_progress(msg):
+                    self.preview.config(text=msg)
+                    self.update_idletasks()
+
+                stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                converted_dir = output_root / f"converted_jpgs_{stamp}"
+                self.log("Phase 0: converting source photos to optimized JPGs...")
+                converted_dir = convert_photos_to_jpg(
+                    original_photos_dir,
+                    converted_dir,
+                    log=self.log,
+                    progress=phase0_progress,
+                )
+                photos_dir = converted_dir
+                self.log(f"Phase 0: using converted JPG folder -> {photos_dir}")
+
+            photos, photos_dir, output_root, template, borders, textures = self.validate(photos_dir=photos_dir)
             self.update_math_preview()
 
             project_name = safe_filename(self.project_name.get())

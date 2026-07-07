@@ -11,5 +11,6 @@
   "opening_w": 1428,
   "opening_h": 717,
   "border_minutes": 25.0,
+  "convert_photos": true,
   "scale_opening_with_border": true
 }
