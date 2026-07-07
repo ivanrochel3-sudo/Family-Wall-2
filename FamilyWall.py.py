@@ -145,6 +145,22 @@ def js_string(s: str) -> str:
     return s.replace('\\', '/').replace('"', '\\"')
 
 
+def basic_motion_filter_xml(scale_percent: float, center_horiz=0.0, center_vert=0.0):
+    return f'''            <filter>
+              <effect authoringApp="PremierePro">
+                <name>Basic Motion</name>
+                <effectid>basic</effectid>
+                <effectcategory>motion</effectcategory>
+                <effecttype>motion</effecttype>
+                <mediatype>video</mediatype>
+                <parameter><parameterid>scale</parameterid><name>Scale</name>
+                  <value>{scale_percent:.6f}</value></parameter>
+                <parameter><parameterid>center</parameterid><name>Center</name>
+                  <value><horiz>{center_horiz:.6f}</horiz><vert>{center_vert:.6f}</vert></value></parameter>
+              </effect>
+            </filter>'''
+
+
 def make_photo_clipitem(path: Path, clip_id: str, start: int, end: int, fps: int, scale_percent: float, canvas_w: int, canvas_h: int, media_w=None, media_h=None):
     name = path.name
     file_id = "file-" + clip_id
@@ -167,20 +183,34 @@ def make_photo_clipitem(path: Path, clip_id: str, start: int, end: int, fps: int
                 <pixelaspectratio>square</pixelaspectratio>
               </samplecharacteristics></video></media>
             </file>
-            <filter>
-              <effect>
-                <name>Basic Motion</name>
-                <effectid>basic</effectid>
-                <effectcategory>motion</effectcategory>
-                <effecttype>motion</effecttype>
-                <mediatype>video</mediatype>
-                <parameter><parameterid>scale</parameterid><name>Scale</name>
-                  <value>{scale_percent:.6f}</value></parameter>
-                <parameter><parameterid>center</parameterid><name>Center</name>
-                  <value><horiz>0</horiz><vert>0</vert></value></parameter>
-              </effect>
-            </filter>
+{basic_motion_filter_xml(scale_percent)}
           </clipitem>'''
+
+def make_texture_clipitem(path: Path, clip_id: str, start: int, end: int, fps: int, scale_percent: float, canvas_w: int, canvas_h: int, media_w=None, media_h=None, center_horiz=0.0, center_vert=0.0):
+    name = path.name
+    file_id = "file-" + clip_id
+    duration = end - start
+    media_w = int(media_w or canvas_w)
+    media_h = int(media_h or canvas_h)
+    return f'''          <clipitem id="{xml_escape(clip_id)}">
+            <name>{xml_escape(name)}</name>
+            <duration>{duration}</duration>
+            <rate><timebase>{fps}</timebase><ntsc>FALSE</ntsc></rate>
+            <start>{start}</start><end>{end}</end>
+            <in>0</in><out>{duration}</out>
+            <file id="{xml_escape(file_id)}">
+              <name>{xml_escape(name)}</name>
+              <pathurl>{xml_escape(file_url(path))}</pathurl>
+              <rate><timebase>{fps}</timebase><ntsc>FALSE</ntsc></rate>
+              <duration>{duration}</duration>
+              <media><video><samplecharacteristics>
+                <width>{media_w}</width><height>{media_h}</height>
+                <pixelaspectratio>square</pixelaspectratio>
+              </samplecharacteristics></video></media>
+            </file>
+{basic_motion_filter_xml(100.0, center_horiz=0.0, center_vert=0.0)}
+          </clipitem>'''
+
 
 def make_border_clipitem(path: Path, clip_id: str, start: int, end: int, fps: int, scale_percent: float, canvas_w: int, canvas_h: int, media_w=None, media_h=None):
     name = path.name
@@ -204,19 +234,7 @@ def make_border_clipitem(path: Path, clip_id: str, start: int, end: int, fps: in
                 <pixelaspectratio>square</pixelaspectratio>
               </samplecharacteristics></video></media>
             </file>
-            <filter>
-              <effect>
-                <name>Basic Motion</name>
-                <effectid>basic</effectid>
-                <effectcategory>motion</effectcategory>
-                <effecttype>motion</effecttype>
-                <mediatype>video</mediatype>
-                <parameter><parameterid>scale</parameterid><name>Scale</name>
-                  <value>{scale_percent:.6f}</value></parameter>
-                <parameter><parameterid>center</parameterid><name>Center</name>
-                  <value><horiz>0</horiz><vert>0</vert></value></parameter>
-              </effect>
-            </filter>
+{basic_motion_filter_xml(100.0)}
           </clipitem>'''
 
 
@@ -262,6 +280,7 @@ def make_sequence_xml_body(photos, sequence_name, seq_id, fps, canvas_w, canvas_
     bg_scales = []
     sharp_scales = []
     media_sizes = []
+    v4_scales = []
     for p in photos:
         size = get_image_size(p)
         if size:
@@ -308,14 +327,10 @@ def make_sequence_xml_body(photos, sequence_name, seq_id, fps, canvas_w, canvas_
             if t is None:
                 break
 
-            t_size = get_image_size(t)
-            if t_size:
-                t_scale = scale_to_fill(t_size[0], t_size[1], canvas_w, canvas_h)
-                t_media_w, t_media_h = t_size
-            else:
-                t_scale = 100.0
-                t_media_w, t_media_h = canvas_w, canvas_h
-            lines.append(make_photo_clipitem(t, f's{seq_id}-texture-{slot+1}', start, end, fps, t_scale, canvas_w, canvas_h, t_media_w, t_media_h))
+            t_scale = 100.0
+            t_media_w, t_media_h = 1920, 1080
+            # Premiere/FCP XML does not reliably expose a blend-mode parameter here, so Luminosity is left unset.
+            lines.append(make_texture_clipitem(t, f's{seq_id}-texture-{slot+1}', start, end, fps, t_scale, canvas_w, canvas_h, t_media_w, t_media_h))
             slot += 1
             start = end
         lines.append('        </track>')
@@ -343,14 +358,10 @@ def make_sequence_xml_body(photos, sequence_name, seq_id, fps, canvas_w, canvas_
             if b is None:
                 break
             
-            b_size = get_image_size(b)
-            if b_size:
-                b_scale = scale_to_fill(b_size[0], b_size[1], canvas_w, canvas_h)
-                b_media_w, b_media_h = b_size
-            else:
-                b_scale = 100.0
-                b_media_w, b_media_h = canvas_w, canvas_h
+            b_scale = 100.0
+            b_media_w, b_media_h = 1920, 1080
             lines.append(make_border_clipitem(b, f's{seq_id}-border-{slot+1}', start, end, fps, b_scale, canvas_w, canvas_h, b_media_w, b_media_h))
+            v4_scales.append(b_scale)
             border_records.append((start, end, b))
             slot += 1
             start = end
@@ -359,7 +370,11 @@ def make_sequence_xml_body(photos, sequence_name, seq_id, fps, canvas_w, canvas_
     lines.append('      </video>')
     lines.append('    </media>')
     lines.append('  </sequence>')
-    return "\n".join(lines), border_records
+    motion_plan = [
+        {"sequenceName": sequence_name, "trackIndex": 2, "scales": sharp_scales},
+        {"sequenceName": sequence_name, "trackIndex": 3, "scales": v4_scales},
+    ]
+    return "\n".join(lines), border_records, motion_plan
 
 
 def wrap_xmeml(sequence_bodies):
@@ -369,8 +384,10 @@ def wrap_xmeml(sequence_bodies):
     return "\n".join(lines)
 
 
-def make_jsx_import_helper(xml_paths, project_path: Path):
+def make_jsx_import_helper(xml_paths, project_path: Path, motion_adjustments=None):
     xml_array = ",\n".join([f'    "{js_string(str(p.resolve()))}"' for p in xml_paths])
+    motion_adjustments = motion_adjustments or []
+    motion_json = json.dumps(motion_adjustments, indent=2)
     return f'''// Family Wall Premiere Import Helper - Phase 2 only
 // Generated {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
 // Purpose: import generated XML sequence(s) into the copied Premiere project.
@@ -380,6 +397,107 @@ var projectPath = "{js_string(str(project_path.resolve()))}";
 var xmlPaths = [
 {xml_array}
 ];
+var motionAdjustments = {motion_json};
+
+function getCollectionItem(collection, index) {{
+    if (!collection) return null;
+    if (collection.length) return collection[index];
+    if (collection.numItems !== undefined) return collection.getItem(index);
+    return null;
+}}
+
+function getPropertyCount(component) {{
+    if (!component || !component.properties) return 0;
+    if (component.properties.length !== undefined) return component.properties.length;
+    if (component.properties.numItems !== undefined) return component.properties.numItems;
+    return 0;
+}}
+
+function getPropertyAt(component, index) {{
+    if (!component || !component.properties) return null;
+    if (component.properties.length !== undefined) return component.properties[index];
+    if (component.properties.numItems !== undefined) return component.properties.getItem(index);
+    return null;
+}}
+
+function findPropertyByName(component, name) {{
+    if (!component || !component.properties) return null;
+    var count = getPropertyCount(component);
+    for (var i = 0; i < count; i++) {{
+        var prop = getPropertyAt(component, i);
+        if (prop && prop.name && prop.name.toLowerCase() === name.toLowerCase()) {{
+            return prop;
+        }}
+    }}
+    return null;
+}}
+
+function setClipScale(trackItem, scaleValue, label) {{
+    if (!trackItem) return false;
+
+    try {{
+        if (trackItem.setToFrameSize) {{
+            trackItem.setToFrameSize();
+            return true;
+        }}
+    }} catch (e) {{}}
+
+    try {{
+        var componentCount = trackItem.components ? (trackItem.components.length !== undefined ? trackItem.components.length : trackItem.components.numItems) : 0;
+        for (var i = 0; i < componentCount; i++) {{
+            var component = trackItem.components[i] || trackItem.components.getItem(i);
+            if (!component) continue;
+            var componentName = component.displayName || component.name || "";
+            if (componentName.toLowerCase().indexOf("basic motion") >= 0 || componentName.toLowerCase().indexOf("motion") >= 0) {{
+                var scaleProp = findPropertyByName(component, "Scale");
+                if (scaleProp && scaleProp.setValue) {{
+                    scaleProp.setValue(scaleValue);
+                    return true;
+                }}
+            }}
+        }}
+    }} catch (e) {{
+        $.writeln("Could not reach Basic Motion Scale for " + label + ": " + e);
+    }}
+
+    try {{
+        if (trackItem.motion && trackItem.motion.scale !== undefined) {{
+            trackItem.motion.scale = scaleValue;
+            return true;
+        }}
+    }} catch (e) {{}}
+
+    try {{
+        if (trackItem.videoMotion && trackItem.videoMotion.scale !== undefined) {{
+            trackItem.videoMotion.scale = scaleValue;
+            return true;
+        }}
+    }} catch (e) {{}}
+
+    $.writeln("Basic Motion scale could not be updated reliably for " + label + ".");
+    return false;
+}}
+
+function applyMotionAdjustmentsToSequence(seq) {{
+    if (!seq) return;
+    for (var i = 0; i < motionAdjustments.length; i++) {{
+        var plan = motionAdjustments[i];
+        if (!plan || plan.sequenceName !== seq.name) continue;
+        var track = seq.videoTracks ? seq.videoTracks[plan.trackIndex] : null;
+        if (!track || !track.clips) continue;
+        var clips = track.clips;
+        var clipCount = clips.length !== undefined ? clips.length : (clips.numItems !== undefined ? clips.numItems : 0);
+        if (!clipCount) continue;
+        for (var c = 0; c < clipCount; c++) {{
+            var trackItem = getCollectionItem(clips, c);
+            if (!trackItem) continue;
+            var scaleValue = plan.scales && plan.scales[c] !== undefined ? plan.scales[c] : null;
+            if (scaleValue === null) continue;
+            var label = seq.name + " / track " + plan.trackIndex + " / clip " + (c + 1);
+            setClipScale(trackItem, scaleValue, label);
+        }}
+    }}
+}}
 
 function importAllXmls() {{
     try {{
@@ -390,6 +508,20 @@ function importAllXmls() {{
 
     for (var i = 0; i < xmlPaths.length; i++) {{
         app.project.importFiles([xmlPaths[i]], true, app.project.rootItem, false);
+    }}
+
+    try {{
+        if (app.project && app.project.sequences) {{
+            var sequenceCount = app.project.sequences.length !== undefined ? app.project.sequences.length : (app.project.sequences.numItems !== undefined ? app.project.sequences.numItems : 0);
+            for (var s = 0; s < sequenceCount; s++) {{
+                var seq = getCollectionItem(app.project.sequences, s);
+                if (seq) {{
+                    applyMotionAdjustmentsToSequence(seq);
+                }}
+            }}
+        }}
+    }} catch (e) {{
+        $.writeln("Family Wall motion adjustment pass failed: " + e);
     }}
 
     try {{
@@ -734,6 +866,7 @@ class App(tk.Tk):
             texture_picker = TexturePicker(textures, seed_text=f"{project_name}-{stamp}-texture") if textures else None
 
             sequence_bodies = []
+            sequence_motion_plan = []
             manifest_lines = []
             borders_used_summary = []
             manifest_lines.append(f"Family Wall App v{VERSION}")
@@ -759,7 +892,7 @@ class App(tk.Tk):
                 collection_num = idx // per + 1
                 chunk = photos[idx:idx + per]
                 seq_name = f"{self.base_sequence_name.get()} {collection_num}"
-                seq_body, border_records = make_sequence_xml_body(
+                seq_body, border_records, motion_plan = make_sequence_xml_body(
                     photos=chunk,
                     sequence_name=seq_name,
                     seq_id=collection_num,
@@ -779,6 +912,9 @@ class App(tk.Tk):
                 )
                 sequence_bodies.append(seq_body)
                 borders_used_summary.append((seq_name, border_records))
+                sequence_motion_plan.extend([
+                    {"sequenceName": seq_name, **plan} for plan in motion_plan
+                ])
 
                 manifest_lines.append(f"{seq_name}: {len(chunk)} photos")
                 manifest_lines.append(f"  First: {chunk[0].name}")
@@ -797,7 +933,7 @@ class App(tk.Tk):
             xmls_for_jsx = [combined_xml]
             project_for_jsx = copied_project if copied_project else (premiere_folder / f"{project_name}.prproj")
             jsx_path = premiere_folder / "import_family_wall_combined_xml.jsx"
-            jsx_path.write_text(make_jsx_import_helper(xmls_for_jsx, project_for_jsx), encoding="utf-8")
+            jsx_path.write_text(make_jsx_import_helper(xmls_for_jsx, project_for_jsx, sequence_motion_plan), encoding="utf-8")
 
             manifest_path = run_folder / "manifest.txt"
             manifest_path.write_text("\n".join(manifest_lines), encoding="utf-8")

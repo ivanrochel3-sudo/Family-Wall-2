@@ -1,0 +1,15 @@
+{
+  "template_path": "C:/Users/ivanr/OneDrive/Desktop/Family Wall Pr Template/Name.prproj",
+  "border_folder": "C:/Users/ivanr/OneDrive/Desktop/Family Wall Stuff/Cutout Borders",
+  "texture_folder": "C:/Users/ivanr/OneDrive/Desktop/Family Wall Stuff/Textures",
+  "output_root": "C:/Users/ivanr/OneDrive/Desktop/Ivan Family Wall",
+  "canvas_w": 1920,
+  "canvas_h": 1080,
+  "fps": 24,
+  "photo_seconds": 20.0,
+  "collection_hours": 10.0,
+  "opening_w": 1428,
+  "opening_h": 717,
+  "border_minutes": 25.0,
+  "scale_opening_with_border": true
+}
