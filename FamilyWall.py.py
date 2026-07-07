@@ -49,6 +49,7 @@ DEFAULT_COLLECTION_HOURS = 10.0
 DEFAULT_OPENING_W = 1428
 DEFAULT_OPENING_H = 717
 DEFAULT_BORDER_MINUTES = 25.0
+DEFAULT_TEXTURE_MINUTES = 25.0
 DEFAULT_SCALE_OPENING_WITH_BORDER = True
 
 try:
@@ -243,10 +244,15 @@ class BorderPicker:
         return self.deck.pop()
 
 
-def make_sequence_xml_body(photos, sequence_name, seq_id, fps, canvas_w, canvas_h, opening_w, opening_h, photo_seconds, borders=None, border_minutes=25.0, border_picker=None, scale_opening_with_border=True):
+class TexturePicker(BorderPicker):
+    pass
+
+
+def make_sequence_xml_body(photos, sequence_name, seq_id, fps, canvas_w, canvas_h, opening_w, opening_h, photo_seconds, borders=None, border_minutes=25.0, border_picker=None, scale_opening_with_border=True, textures=None, texture_picker=None, texture_minutes=25.0):
     dur = frames(photo_seconds, fps)
     total_frames = dur * len(photos)
     border_slot_frames = frames(border_minutes * 60.0, fps)
+    texture_slot_frames = frames(texture_minutes * 60.0, fps)
 
     border_scale_percent, representative_border_size = representative_border_scale(borders, canvas_w, canvas_h)
     opening_multiplier = (border_scale_percent / 100.0) if (scale_opening_with_border and representative_border_size) else 1.0
@@ -291,12 +297,31 @@ def make_sequence_xml_body(photos, sequence_name, seq_id, fps, canvas_w, canvas_
         lines.append(make_photo_clipitem(p, f's{seq_id}-bg-{i+1}', start, end, fps, bg_scales[i], canvas_w, canvas_h, media_sizes[i][0], media_sizes[i][1]))
     lines.append('        </track>')
 
-    # V2 blur / adjustment-layer lane placeholder.
-    # Premiere's FCP XML import does not reliably create a native Adjustment Layer,
-    # so this empty track is intentionally inserted between the background and sharp layers.
-    # Add your Premiere adjustment layer here after import, then apply blur to that layer.
-    lines.append('        <track>')
-    lines.append('        </track>')
+    # V2 texture lane. If no texture folder is selected, this stays empty.
+    if textures and texture_picker and texture_slot_frames > 0 and total_frames > 0:
+        lines.append('        <track>')
+        slot = 0
+        start = 0
+        while start < total_frames:
+            end = min(total_frames, start + texture_slot_frames)
+            t = texture_picker.next()
+            if t is None:
+                break
+
+            t_size = get_image_size(t)
+            if t_size:
+                t_scale = scale_to_fill(t_size[0], t_size[1], canvas_w, canvas_h)
+                t_media_w, t_media_h = t_size
+            else:
+                t_scale = 100.0
+                t_media_w, t_media_h = canvas_w, canvas_h
+            lines.append(make_photo_clipitem(t, f's{seq_id}-texture-{slot+1}', start, end, fps, t_scale, canvas_w, canvas_h, t_media_w, t_media_h))
+            slot += 1
+            start = end
+        lines.append('        </track>')
+    else:
+        lines.append('        <track>')
+        lines.append('        </track>')
 
     # V3 sharp fit
     lines.append('        <track>')
@@ -431,6 +456,7 @@ class App(tk.Tk):
         self.template_path = tk.StringVar(value=cfg.get("template_path", ""))
         self.photo_folder = tk.StringVar()
         self.border_folder = tk.StringVar(value=cfg.get("border_folder", ""))
+        self.texture_folder = tk.StringVar(value=cfg.get("texture_folder", ""))
         self.output_root = tk.StringVar(value=cfg.get("output_root", str(base)))
         self.project_name = tk.StringVar(value="Family Wall Project")
         self.base_sequence_name = tk.StringVar(value="Collection")
@@ -457,7 +483,7 @@ class App(tk.Tk):
         root = ttk.Frame(self)
         root.pack(fill="both", expand=True)
         root.columnconfigure(1, weight=1)
-        root.rowconfigure(12, weight=1)
+        root.rowconfigure(13, weight=1)
 
         ttk.Label(root, text="Family Wall App - Phase 1 + Phase 2", font=("Segoe UI", 16, "bold")).grid(
             row=0, column=0, columnspan=3, sticky="w", padx=12, pady=(14, 4)
@@ -474,10 +500,11 @@ class App(tk.Tk):
         path_row("Premiere template .prproj", self.template_path, self.pick_template, 2)
         path_row("Photo folder", self.photo_folder, self.pick_photos, 3)
         path_row("Border folder", self.border_folder, self.pick_borders, 4)
-        path_row("Output root folder", self.output_root, self.pick_output_root, 5)
+        path_row("Texture folder", self.texture_folder, self.pick_textures, 5)
+        path_row("Output root folder", self.output_root, self.pick_output_root, 6)
 
         names = ttk.LabelFrame(root, text="Naming")
-        names.grid(row=6, column=0, columnspan=3, sticky="ew", padx=12, pady=8)
+        names.grid(row=7, column=0, columnspan=3, sticky="ew", padx=12, pady=8)
         names.columnconfigure(1, weight=1)
         names.columnconfigure(3, weight=1)
         ttk.Label(names, text="Project name").grid(row=0, column=0, sticky="w", padx=8, pady=6)
@@ -486,7 +513,7 @@ class App(tk.Tk):
         ttk.Entry(names, textvariable=self.base_sequence_name).grid(row=0, column=3, sticky="ew", padx=8, pady=6)
 
         settings = ttk.LabelFrame(root, text="Collection settings")
-        settings.grid(row=7, column=0, columnspan=3, sticky="ew", padx=12, pady=8)
+        settings.grid(row=8, column=0, columnspan=3, sticky="ew", padx=12, pady=8)
         for c in range(8):
             settings.columnconfigure(c, weight=1)
 
@@ -513,7 +540,7 @@ class App(tk.Tk):
                 r += 1
 
         opts = ttk.LabelFrame(root, text="Phase 2 options")
-        opts.grid(row=8, column=0, columnspan=3, sticky="ew", padx=12, pady=8)
+        opts.grid(row=9, column=0, columnspan=3, sticky="ew", padx=12, pady=8)
         ttk.Checkbutton(opts, text="Copy Premiere template into project folder", variable=self.copy_template).grid(row=0, column=0, sticky="w", padx=8, pady=6)
         ttk.Checkbutton(opts, text="Open copied Premiere project when finished", variable=self.open_project_after).grid(row=0, column=1, sticky="w", padx=8, pady=6)
         ttk.Checkbutton(opts, text="Open output folder when finished", variable=self.open_folder_after).grid(row=0, column=2, sticky="w", padx=8, pady=6)
@@ -521,20 +548,20 @@ class App(tk.Tk):
         ttk.Checkbutton(opts, text="Scale sharp opening with border", variable=self.scale_opening_with_border).grid(row=1, column=1, sticky="w", padx=8, pady=6)
 
         self.preview = ttk.Label(root, text="", font=("Segoe UI", 10, "bold"))
-        self.preview.grid(row=9, column=0, columnspan=3, sticky="w", padx=12, pady=(4, 6))
+        self.preview.grid(row=10, column=0, columnspan=3, sticky="w", padx=12, pady=(4, 6))
 
         actions = ttk.Frame(root)
-        actions.grid(row=10, column=0, columnspan=3, sticky="ew", padx=12, pady=8)
+        actions.grid(row=11, column=0, columnspan=3, sticky="ew", padx=12, pady=8)
         ttk.Button(actions, text="Save Template/Settings", command=self.save_current_settings).pack(side="left")
         ttk.Button(actions, text="Create Family Wall Project", command=self.generate).pack(side="left", padx=8)
         ttk.Button(actions, text="Refresh Math", command=self.update_math_preview).pack(side="left")
         ttk.Button(actions, text="Quit", command=self.destroy).pack(side="right")
 
         note = ttk.Label(root, text="Premiere note: this creates one combined XML. Auto-import is attempted through a JSX helper, but Premiere may still require File > Scripts > Run Script File.")
-        note.grid(row=11, column=0, columnspan=3, sticky="w", padx=12, pady=(0, 4))
+        note.grid(row=12, column=0, columnspan=3, sticky="w", padx=12, pady=(0, 4))
 
         self.status = tk.Text(root, height=18, wrap="word")
-        self.status.grid(row=12, column=0, columnspan=3, sticky="nsew", padx=12, pady=(4, 12))
+        self.status.grid(row=13, column=0, columnspan=3, sticky="nsew", padx=12, pady=(4, 12))
         self.log("Ready.")
         self.log("No Phase 3: this app will not export, render, or queue anything.")
         self.log("Default: 20 seconds/photo, 10 hours/collection = 1,800 photos per collection.")
@@ -551,6 +578,7 @@ class App(tk.Tk):
         data = {
             "template_path": self.template_path.get(),
             "border_folder": self.border_folder.get(),
+            "texture_folder": self.texture_folder.get(),
             "output_root": self.output_root.get(),
             "canvas_w": self.canvas_w.get(),
             "canvas_h": self.canvas_h.get(),
@@ -592,6 +620,13 @@ class App(tk.Tk):
             self.save_current_settings()
             self.update_math_preview()
 
+    def pick_textures(self):
+        p = filedialog.askdirectory(title="Select texture folder")
+        if p:
+            self.texture_folder.set(p)
+            self.save_current_settings()
+            self.update_math_preview()
+
     def pick_output_root(self):
         p = filedialog.askdirectory(title="Select output root folder")
         if p:
@@ -626,6 +661,7 @@ class App(tk.Tk):
         output_root = Path(self.output_root.get())
         template = Path(self.template_path.get()) if self.template_path.get().strip() else None
         border_dir = Path(self.border_folder.get()) if self.border_folder.get().strip() else None
+        texture_dir = Path(self.texture_folder.get()) if self.texture_folder.get().strip() else None
 
         if not photos_dir.exists():
             raise ValueError("Please choose a valid photo folder.")
@@ -641,6 +677,12 @@ class App(tk.Tk):
             borders = list_borders(border_dir)
             if not borders:
                 raise ValueError("No supported border files found. Supported: JPG, PNG, WEBP, TIFF, MP4, MOV, M4V.")
+
+        textures = []
+        if texture_dir:
+            if not texture_dir.exists():
+                raise ValueError("Texture folder is selected but does not exist.")
+            textures = list_images(texture_dir)
 
         if self.copy_template.get():
             if not template or not template.exists() or template.suffix.lower() != ".prproj":
@@ -660,13 +702,13 @@ class App(tk.Tk):
             raise ValueError("Opening dimensions must be greater than 0.")
         if int(self.opening_w.get()) > int(self.canvas_w.get()) or int(self.opening_h.get()) > int(self.canvas_h.get()):
             raise ValueError("Opening dimensions should fit inside the canvas.")
-        return photos, photos_dir, output_root, template, borders
+        return photos, photos_dir, output_root, template, borders, textures
 
     def generate(self):
         try:
             self.save_current_settings()
             self.log("Creating Family Wall project...")
-            photos, photos_dir, output_root, template, borders = self.validate()
+            photos, photos_dir, output_root, template, borders, textures = self.validate()
             self.update_math_preview()
 
             project_name = safe_filename(self.project_name.get())
@@ -689,6 +731,7 @@ class App(tk.Tk):
             per = self.photos_per_collection()
             base_seq = safe_filename(self.base_sequence_name.get() or "Collection")
             border_picker = BorderPicker(borders, seed_text=f"{project_name}-{stamp}") if borders else None
+            texture_picker = TexturePicker(textures, seed_text=f"{project_name}-{stamp}-texture") if textures else None
 
             sequence_bodies = []
             manifest_lines = []
@@ -705,6 +748,7 @@ class App(tk.Tk):
             manifest_lines.append(f"Sharp opening: {self.opening_w.get()}x{self.opening_h.get()}")
             manifest_lines.append(f"Scale opening with border: {self.scale_opening_with_border.get()}")
             manifest_lines.append(f"Border folder: {self.border_folder.get() if borders else 'None'}")
+            manifest_lines.append(f"Texture folder: {self.texture_folder.get() if textures else 'None'}")
             manifest_lines.append(f"Border change interval: {self.border_minutes.get()} minutes")
             manifest_lines.append(f"Template: {template if template else 'None'}")
             manifest_lines.append(f"Copied project: {copied_project if copied_project else 'None'}")
@@ -729,6 +773,9 @@ class App(tk.Tk):
                     border_minutes=float(self.border_minutes.get()),
                     border_picker=border_picker,
                     scale_opening_with_border=self.scale_opening_with_border.get(),
+                    textures=textures,
+                    texture_picker=texture_picker,
+                    texture_minutes=DEFAULT_TEXTURE_MINUTES,
                 )
                 sequence_bodies.append(seq_body)
                 borders_used_summary.append((seq_name, border_records))
