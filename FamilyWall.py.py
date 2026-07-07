@@ -272,11 +272,6 @@ def make_sequence_xml_body(photos, sequence_name, seq_id, fps, canvas_w, canvas_
     border_slot_frames = frames(border_minutes * 60.0, fps)
     texture_slot_frames = frames(texture_minutes * 60.0, fps)
 
-    border_scale_percent, representative_border_size = representative_border_scale(borders, canvas_w, canvas_h)
-    opening_multiplier = (border_scale_percent / 100.0) if (scale_opening_with_border and representative_border_size) else 1.0
-    effective_opening_w = opening_w * opening_multiplier
-    effective_opening_h = opening_h * opening_multiplier
-
     bg_scales = []
     sharp_scales = []
     media_sizes = []
@@ -286,8 +281,9 @@ def make_sequence_xml_body(photos, sequence_name, seq_id, fps, canvas_w, canvas_
         if size:
             img_w, img_h = size
             media_sizes.append((img_w, img_h))
-            bg_scales.append(scale_to_fill(img_w, img_h, canvas_w, canvas_h))
-            sharp_scales.append(scale_to_fit(img_w, img_h, effective_opening_w, effective_opening_h))
+            bg_scales.append(max(canvas_w / img_w, canvas_h / img_h) * 100.0)
+            fit_scale = min(canvas_w / img_w, canvas_h / img_h) * 100.0
+            sharp_scales.append(fit_scale * 0.764)
         else:
             media_sizes.append((canvas_w, canvas_h))
             bg_scales.append(100.0)
@@ -924,6 +920,16 @@ class App(tk.Tk):
                     for slot_i, (_, _, b) in enumerate(border_records, 1):
                         manifest_lines.append(f"    {slot_i:02d}. {b.name}")
                 manifest_lines.append("")
+                first_photo_name = chunk[0].name if chunk else ""
+                first_photo_size = get_image_size(chunk[0]) if chunk else None
+                if first_photo_size:
+                    first_bg_scale = max(int(self.canvas_w.get()) / first_photo_size[0], int(self.canvas_h.get()) / first_photo_size[1]) * 100.0
+                    fit_scale = min(int(self.canvas_w.get()) / first_photo_size[0], int(self.canvas_h.get()) / first_photo_size[1]) * 100.0
+                    first_sharp_scale = fit_scale * 0.764
+                else:
+                    first_bg_scale = 100.0
+                    first_sharp_scale = 75.0
+                self.log(f"Prepared {seq_name}: first photo={first_photo_name}, V1 bg scale={first_bg_scale}, V3 sharp scale={first_sharp_scale}")
                 self.log(f"Prepared {seq_name} with {len(chunk)} photos and {len(border_records)} border slot(s).")
 
             combined_xml = xml_folder / f"{base_seq}_ALL_COLLECTIONS.xml"
