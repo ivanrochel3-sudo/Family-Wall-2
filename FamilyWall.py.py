@@ -46,8 +46,8 @@ DEFAULT_CANVAS_H = 1080
 DEFAULT_FPS = 24
 DEFAULT_PHOTO_SECONDS = 20.0
 DEFAULT_COLLECTION_HOURS = 10.0
-DEFAULT_OPENING_W = 1428
-DEFAULT_OPENING_H = 717
+DEFAULT_OPENING_W = 1640
+DEFAULT_OPENING_H = 824
 DEFAULT_BORDER_MINUTES = 25.0
 DEFAULT_TEXTURE_MINUTES = 25.0
 DEFAULT_SCALE_OPENING_WITH_BORDER = True
@@ -268,7 +268,8 @@ class TexturePicker(BorderPicker):
 
 def make_sequence_xml_body(photos, sequence_name, seq_id, fps, canvas_w, canvas_h, opening_w, opening_h, photo_seconds, borders=None, border_minutes=25.0, border_picker=None, scale_opening_with_border=True, textures=None, texture_picker=None, texture_minutes=25.0):
     dur = frames(photo_seconds, fps)
-    total_frames = dur * len(photos)
+    photo_count = len(photos)
+    total_frames = dur * photo_count
     border_slot_frames = frames(border_minutes * 60.0, fps)
     texture_slot_frames = frames(texture_minutes * 60.0, fps)
 
@@ -283,7 +284,13 @@ def make_sequence_xml_body(photos, sequence_name, seq_id, fps, canvas_w, canvas_
             media_sizes.append((img_w, img_h))
             bg_scales.append(max(canvas_w / img_w, canvas_h / img_h) * 100.0)
             fit_scale = min(canvas_w / img_w, canvas_h / img_h) * 100.0
-            sharp_scales.append(fit_scale * 0.764)
+            photo_ratio = img_w / img_h
+            opening_ratio = 1640 / 824
+            if photo_ratio > opening_ratio:
+                sharp_scale = (1640 / img_w) * 100.0
+            else:
+                sharp_scale = fit_scale * 0.764
+            sharp_scales.append(sharp_scale)
         else:
             media_sizes.append((canvas_w, canvas_h))
             bg_scales.append(100.0)
@@ -650,10 +657,6 @@ class App(tk.Tk):
             ("Seconds/photo", self.photo_seconds),
             ("Hours/collection", self.collection_hours),
             ("Border minutes", self.border_minutes),
-            ("Canvas W", self.canvas_w),
-            ("Canvas H", self.canvas_h),
-            ("Opening W", self.opening_w),
-            ("Opening H", self.opening_h),
         ]
         r = 0
         c = 0
@@ -667,7 +670,7 @@ class App(tk.Tk):
                 c = 0
                 r += 1
 
-        opts = ttk.LabelFrame(root, text="Phase 2 options")
+        opts = ttk.LabelFrame(root, text="Output Options")
         opts.grid(row=9, column=0, columnspan=3, sticky="ew", padx=12, pady=8)
         ttk.Checkbutton(opts, text="Copy Premiere template into project folder", variable=self.copy_template).grid(row=0, column=0, sticky="w", padx=8, pady=6)
         ttk.Checkbutton(opts, text="Open copied Premiere project when finished", variable=self.open_project_after).grid(row=0, column=1, sticky="w", padx=8, pady=6)
@@ -681,7 +684,7 @@ class App(tk.Tk):
         actions = ttk.Frame(root)
         actions.grid(row=11, column=0, columnspan=3, sticky="ew", padx=12, pady=8)
         ttk.Button(actions, text="Save Template/Settings", command=self.save_current_settings).pack(side="left")
-        ttk.Button(actions, text="Create Family Wall Project", command=self.generate).pack(side="left", padx=8)
+        ttk.Button(actions, text="Create Family Wall", command=self.generate).pack(side="left", padx=8)
         ttk.Button(actions, text="Refresh Math", command=self.update_math_preview).pack(side="left")
         ttk.Button(actions, text="Quit", command=self.destroy).pack(side="right")
 
@@ -720,7 +723,6 @@ class App(tk.Tk):
         }
         save_config(data)
         self.log(f"Settings saved: {config_path()}")
-        messagebox.showinfo("Saved", "Template/settings saved for future runs.")
 
     def pick_template(self):
         p = filedialog.askopenfilename(
@@ -925,7 +927,13 @@ class App(tk.Tk):
                 if first_photo_size:
                     first_bg_scale = max(int(self.canvas_w.get()) / first_photo_size[0], int(self.canvas_h.get()) / first_photo_size[1]) * 100.0
                     fit_scale = min(int(self.canvas_w.get()) / first_photo_size[0], int(self.canvas_h.get()) / first_photo_size[1]) * 100.0
-                    first_sharp_scale = fit_scale * 0.764
+                    photo_ratio = first_photo_size[0] / first_photo_size[1]
+                    opening_ratio = 1640 / 824
+                    if photo_ratio > opening_ratio:
+                        first_sharp_scale = (1640 / first_photo_size[0]) * 100.0
+                        self.log(f"Wide-photo V3 correction used for {first_photo_name}: photo_ratio={photo_ratio:.6f}, opening_ratio={opening_ratio:.6f}")
+                    else:
+                        first_sharp_scale = fit_scale * 0.764
                 else:
                     first_bg_scale = 100.0
                     first_sharp_scale = 75.0
@@ -959,11 +967,9 @@ class App(tk.Tk):
             self.log("No exports/renders were started.")
 
             if self.open_folder_after.get():
-                os.startfile(str(run_folder))
+                os.startfile(str(xml_folder))
             if self.open_project_after.get() and copied_project:
                 os.startfile(str(copied_project))
-
-            messagebox.showinfo("Created", "Created 1 combined XML containing all collection sequences.\n\nNo exports were started.")
         except Exception as e:
             self.log("ERROR: " + str(e))
             self.log(traceback.format_exc())
