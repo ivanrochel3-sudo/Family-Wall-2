@@ -10,7 +10,16 @@
   "collection_hours": 10.0,
   "opening_w": 1428,
   "opening_h": 717,
-  "border_minutes": 25.0,
-  "convert_photos": true,
-  "scale_opening_with_border": true
+  "open_project_after": true,
+  "border_timing": "Every 30 Minutes",
+  "texture_timing": "Never",
+  "border_mode": "random_selected",
+  "texture_mode": "use_one",
+  "border_one": "1.png",
+  "texture_one": "1.png",
+  "border_selected": [
+    "3.png",
+    "4.png"
+  ],
+  "texture_selected": []
 }

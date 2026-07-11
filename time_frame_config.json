@@ -1,0 +1,25 @@
+{
+  "template_path": "C:/Users/ivanr/OneDrive/Desktop/Time Frame/TimeFrame Pr Template/Name.prproj",
+  "border_folder": "C:/Users/ivanr/OneDrive/Desktop/Time Frame/Cutout Borders",
+  "texture_folder": "C:/Users/ivanr/OneDrive/Desktop/Time Frame/Textures",
+  "output_root": "C:\\Users\\ivanr\\OneDrive\\Desktop\\Ivan Rochel - Time Frame",
+  "canvas_w": 1920,
+  "canvas_h": 1080,
+  "fps": 24,
+  "photo_seconds": 20.0,
+  "collection_hours": 10.0,
+  "opening_w": 1640,
+  "opening_h": 824,
+  "open_project_after": true,
+  "border_timing": "Every 30 Minutes",
+  "texture_timing": "Every 30 Minutes",
+  "border_mode": "random_selected",
+  "texture_mode": "random_all",
+  "border_one": "1.png",
+  "texture_one": "1.png",
+  "border_selected": [
+    "3.png",
+    "4.png"
+  ],
+  "texture_selected": []
+}
